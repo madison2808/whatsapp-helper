@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "storagePath fehlt." }, { status: 400 });
     }
 
-    // 1) Signed GET-URL fürs Bild (länger gültig)
+    // 1) Bild-URL (5 Min. gültig)
     const admin = createClient(supabaseUrl, serviceKey);
     const signed = await admin.storage.from("uploads").createSignedUrl(storagePath, 300);
     if (signed.error) {
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     }
     const imageUrl = signed.data.signedUrl;
 
-    // 2) Bild-URL serverseitig kurz prüfen (ob OpenAI sie laden kann)
+    // 2) Schnell prüfen, ob es ein Bild ist
     const head = await fetch(imageUrl, { method: "HEAD" });
     if (!head.ok) {
       return NextResponse.json({ error: `Bild nicht abrufbar: ${head.status} ${head.statusText}` }, { status: 400 });
@@ -41,29 +41,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Unerwarteter Content-Type: ${ctype}` }, { status: 400 });
     }
 
-    // 3) OpenAI aufrufen (Responses API – robust mit Bild)
+    // 3) OpenAI Vision via Chat Completions
     const client = new OpenAI({ apiKey: openaiKey });
     const prompt = `Analysiere den WhatsApp-Screenshot und formuliere eine passende Antwort.
 Stil: ${descriptors?.tone ?? "freundlich, klar"}.
 Ziel: ${descriptors?.goal ?? "höflich antworten und nächste Schritte vorschlagen"}.`;
 
-    const resp = await client.responses.create({
+    const cc = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      input: [
+      messages: [
+        { role: "system", content: "Du bist ein WhatsApp Reply Assistant. Antworte kurz und natürlich." },
         {
           role: "user",
+          // TypeScript nörgelt bei image-blobs – daher 'as any'
           content: [
-            { type: "input_text", text: prompt },
-            { type: "input_image", image_url: imageUrl }
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: imageUrl } } as any
           ]
         }
       ]
     });
 
-    const reply = (resp as any)?.output_text || "Keine Antwort erhalten.";
+    const reply = cc.choices?.[0]?.message?.content ?? "Keine Antwort erhalten.";
     return NextResponse.json({ reply });
   } catch (e: any) {
-    // Fehler klar ausgeben (siehst du in Network → Response & in Vercel Function Logs)
-    return NextResponse.json({ error: e?.message ?? "analyze error" }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? "analyze fatal" }, { status: 500 });
   }
 }
