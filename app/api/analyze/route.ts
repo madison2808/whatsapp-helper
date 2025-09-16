@@ -22,7 +22,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "storagePath fehlt." }, { status: 400 });
     }
 
-    // Signierte Bild-URL (5 Min.)
     const admin = createClient(supabaseUrl, serviceKey);
     const signed = await admin.storage.from("uploads").createSignedUrl(storagePath, 300);
     if (signed.error) {
@@ -30,7 +29,6 @@ export async function POST(req: Request) {
     }
     const imageUrl = signed.data.signedUrl;
 
-    // Sanity-Check Bild
     const head = await fetch(imageUrl, { method: "HEAD" });
     if (!head.ok) {
       return NextResponse.json({ error: `Bild nicht abrufbar: ${head.status} ${head.statusText}` }, { status: 400 });
@@ -40,7 +38,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Unerwarteter Content-Type: ${ctype}` }, { status: 400 });
     }
 
-    // Chat Completions (ohne responses.create)
     const client = new OpenAI({ apiKey: openaiKey });
     const prompt = `Analysiere den WhatsApp-Screenshot und formuliere eine passende Antwort.
 Stil: ${descriptors?.tone ?? "freundlich, klar"}.
@@ -54,7 +51,6 @@ Ziel: ${descriptors?.goal ?? "höflich antworten und nächste Schritte vorschlag
           role: "user",
           content: [
             { type: "text", text: prompt },
-            // TS meckert bei image-Objekten -> casten
             { type: "image_url", image_url: { url: imageUrl } } as any
           ]
         }
